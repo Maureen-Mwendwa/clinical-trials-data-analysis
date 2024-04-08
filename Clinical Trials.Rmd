@@ -1,0 +1,946 @@
+---
+title: "Clinical Trials"
+author: "Maureen Mwendwa"
+date: "2024-04-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. 
+
+## Reading Each Dataset
+
+```{r}
+Cancer<-read.csv('/Users/hp/Downloads/Cancer-studies.csv')
+Covid19<-read.csv('/Users/hp/Downloads/Covid 19-studies.csv')
+Malaria<-read.csv('/Users/hp/Downloads/Malaria-studies.csv')
+Heart<-read.csv('/Users/hp/Downloads/Heart.csv')
+Pneumonia<-read.csv('/Users/hp/Downloads/Pneumonia-studies.csv')
+HIV<-read.csv('/Users/hp/Downloads/HIV-studies.csv')
+```
+
+## Combining the Datasets
+
+```{r}
+combined_data <- rbind(Cancer, Covid19, Heart, HIV, Malaria, Pneumonia)
+```
+
+## Add a Column 'SOURCE' to keep track of the source data set
+
+```{r}
+combined_data <- transform(combined_data, Source = rep(c("Cancer", "Covid19", "Heart", "HIV", "Malaria", "Pneumonia"), 
+                                                       c(nrow(Cancer), nrow(Covid19), nrow(Heart), nrow(HIV), nrow(Malaria), nrow(Pneumonia))))
+```
+
+## Data Cleaning
+
+### Identifying Missing Values
+```{r}
+Missing_Values<-any(is.na(combined_data))
+```
+
+### Removing rows with missing values
+```{r}
+combined_data <- na.omit(combined_data)
+```
+
+### Removing Duplicate Rows
+```{r}
+combined_data <- unique(combined_data)
+```
+
+### Removing Outliers for Enrollment
+
+#### Calculate IQR
+```{r}
+Q1 <- quantile(combined_data$Enrollment, 0.25)
+Q3 <- quantile(combined_data$Enrollment, 0.75)
+IQR <- Q3 - Q1
+```
+
+#### Define lower and upper bounds
+```{r}
+lower_bound <- Q1 - 1.5 * IQR
+upper_bound <- Q3 + 1.5 * IQR
+```
+
+### Remove outliers
+```{r}
+combined_data$Enrollment <- ifelse(combined_data$Enrollment >= lower_bound & combined_data$Enrollment <= upper_bound,
+                                   combined_data$Enrollment, NA)
+```
+
+
+
+## Transforming Start.Date, Primary.Completion.Date, Completion.Date, Results.First.Posted,Last.Update.Posted to include only Year and Month
+
+### Convert date columns to Date format if they are not already
+```{r}
+combined_data$Start.Date <- as.Date(combined_data$Start.Date)
+combined_data$Primary.Completion.Date <- as.Date(combined_data$Primary.Completion.Date)
+combined_data$Completion.Date <- as.Date(combined_data$Completion.Date)
+combined_data$Results.First.Posted <- as.Date(combined_data$Results.First.Posted)
+combined_data$Last.Update.Posted <- as.Date(combined_data$Last.Update.Posted)
+```
+
+### Format date columns to include only year
+```{r}
+combined_data$Start.Date <- ifelse(is.na(combined_data$Start.Date), 'NA', format(combined_data$Start.Date, "%Y"))
+combined_data$Primary.Completion.Date <- ifelse(is.na(combined_data$Primary.Completion.Date), 'NA', format(combined_data$Primary.Completion.Date, "%Y"))
+combined_data$Completion.Date <- ifelse(is.na(combined_data$Completion.Date), 'NA', format(combined_data$Completion.Date, "%Y"))
+combined_data$Results.First.Posted <- ifelse(is.na(combined_data$Results.First.Posted), 'NA', format(combined_data$Results.First.Posted, "%Y"))
+combined_data$Last.Update.Posted <- ifelse(is.na(combined_data$Last.Update.Posted), 'NA', format(combined_data$Last.Update.Posted, "%Y"))
+```
+
+## Including only the columns that we want to keep to use in our analysis
+```{r}
+combined_data <- combined_data[, c("NCT.Number", "Study.Status", "Study.Results", "Conditions", "Interventions", "Sponsor", "Sex", "Age", "Phases", "Enrollment", "Funder.Type", "Study.Type", "Study.Design", "Start.Date", "Primary.Completion.Date", "Completion.Date", "Results.First.Posted", "Last.Update.Posted", "Source")]
+```
+
+## creating a set of categories for 'Intervention' based on the patterns we've identified.
+
+### Function to extract unique intervention categories
+```{r}
+extract_unique_interventions <- function(interventions) {
+  categories <- unique(gsub(":.+", "", unlist(strsplit(interventions, "\\|"))))
+  return(paste(categories, collapse = ", "))
+}
+```
+
+### Apply the function to create a new column with intervention categories
+```{r}
+combined_data$Intervention_Categories <- sapply(combined_data$Interventions, extract_unique_interventions)
+```
+
+### Identify the top 9 intervention categories
+```{r}
+top_interventions <- names(sort(table(combined_data$Intervention_Categories), decreasing = TRUE))[1:9]
+```
+
+### Create a new column 'Top_Intervention_Categories' to represent the top 9 categories
+```{r}
+combined_data$Top_Intervention_Categories <- ifelse(combined_data$Intervention_Categories %in% top_interventions,
+                                                    combined_data$Intervention_Categories, "Other")
+```
+
+
+## creating a set of categories for 'Study.Design' based on the patterns we've identified.
+
+### Function to extract Allocation, Interventional Model, and Primary Purpose
+```{r}
+extract_study_design_info <- function(design) {
+  allocation <- gsub(".*Allocation: ([^|]+).*", "\\1", design)
+  interventional_model <- gsub(".*Intervention Model: ([^|]+).*", "\\1", design)
+  primary_purpose <- gsub(".*Primary Purpose: ([^|]+).*", "\\1", design)
+  
+  return(c(allocation, interventional_model, primary_purpose))
+}
+```
+
+### Apply the function to create new columns with extracted information
+```{r}
+study_design_info <- t(sapply(combined_data$Study.Design, extract_study_design_info))
+colnames(study_design_info) <- c("Allocation", "Interventional_Model", "Primary_Purpose")
+```
+
+### Add the new columns to the dataset
+```{r}
+combined_data <- cbind(combined_data, study_design_info)
+```
+
+## Handling Categorical Variables
+
+### Checking unique values for a categorical variable 
+```{r}
+Study_Status<- unique(combined_data$Study.Status)
+Study_Status
+Study_Results<- unique(combined_data$Study.Results)
+Study_Results
+Sex<- unique(combined_data$Sex)
+Sex
+Age<- unique(combined_data$Age)
+Age
+Phases<- unique(combined_data$Phases)
+Phases
+Funder_Type<- unique(combined_data$Funder.Type)
+Funder_Type
+Study_Type<- unique(combined_data$Study.Type)
+Study_Type
+Source<-unique(combined_data$Source)
+Source
+Top_Intervention_Categories<- unique(combined_data$Top_Intervention_Categories)
+Top_Intervention_Categories
+```
+
+### Assigning numeric values to the categorical variables we identified
+
+
+#### Study_Status
+```{r}
+combined_data$Study.Status.numeric <- as.numeric(factor(combined_data$Study.Status, levels = c(
+  "COMPLETED", "NOT_YET_RECRUITING", "UNKNOWN", "ACTIVE_NOT_RECRUITING",
+  "RECRUITING", "WITHDRAWN", "TERMINATED", "SUSPENDED", "ENROLLING_BY_INVITATION"
+)))
+```
+
+#### Study_Results
+```{r}
+combined_data$Study.Results.numeric <- as.numeric(factor(combined_data$Study.Results, levels = c("YES", "NO")))
+```
+
+#### Sex
+```{r}
+combined_data$Sex.numeric <- as.numeric(factor(combined_data$Sex, levels = c("ALL", "MALE", "FEMALE")))
+```
+
+#### Age
+```{r}
+combined_data$Age.numeric <- as.numeric(factor(combined_data$Age, levels = c(
+  "ADULT, OLDER_ADULT", "ADULT", "CHILD, ADULT", "CHILD, ADULT, OLDER_ADULT",
+  "CHILD", "OLDER_ADULT"
+)))
+```
+
+#### Phases
+```{r}
+combined_data$Phases.numeric <- as.numeric(factor(combined_data$Phases, levels = c(
+  "PHASE3", "PHASE2", "EARLY_PHASE1", "PHASE1", "PHASE1|PHASE2", "PHASE4", "PHASE2|PHASE3"
+)))
+```
+
+#### Funder_Type
+```{r}
+combined_data$Funder.Type.numeric <- as.numeric(factor(combined_data$Funder.Type, levels = c(
+  "INDUSTRY", "OTHER", "NIH", "FED", "OTHER_GOV", "NETWORK", "UNKNOWN", "INDIV"
+)))
+```
+
+#### Study_Type
+```{r}
+combined_data$Study.Type.numeric <- as.numeric(factor(combined_data$Study.Type, levels = c("INTERVENTIONAL", "OBSERVATIONAL")))
+```
+
+#### Source
+```{r}
+combined_data$Source.numeric <- as.numeric(factor(combined_data$Source, levels = c(
+  "Cancer", "Covid19", "Heart", "HIV", "Malaria", "Pneumonia"
+)))
+```
+
+#### Allocation
+```{r}
+combined_data$Allocation.numeric <- as.numeric(factor(combined_data$Allocation, levels = c(
+  "RANDOMIZED", "NON_RANDOMIZED"
+)))
+```
+
+#### Interventional_Model
+```{r}
+combined_data$Interventional_Model.numeric <- as.numeric(factor(combined_data$Interventional_Model, levels = c(
+  "PARALLEL", "SINGLE_GROUP", "SEQUENTIAL", "FACTORIAL", "CROSSOVER", "Observational Model:|Time Perspective:p"
+)))
+```
+
+#### Primary_Purpose
+```{r}
+combined_data$Primary_Purpose.numeric <- as.numeric(factor(combined_data$Primary_Purpose, levels = c(
+  "TREATMENT", "DIAGNOSTIC", "PREVENTION", "BASIC_SCIENCE", "SUPPORTIVE_CARE", "OTHER",
+  "HEALTH_SERVICES_RESEARCH", "DEVICE_FEASIBILITY", "ECT", "SCREENING"
+)))
+```
+
+#### Top_Intervention_Categories
+```{r}
+combined_data$Top_Intervention_Categories.numeric <- as.numeric(factor(combined_data$Top_Intervention_Categories, levels = c(
+  "DRUG", "OTHER", "BIOLOGICAL", "PROCEDURE", "DEVICE",
+  "DIAGNOSTIC_TEST", "DRUG,OTHER", "BIOLOGICAL,DRUG", "BEHAVIORAL"
+)))
+```
+
+
+## UNIVARIATE ANALYSIS
+
+### Descriptive Statistic
+
+#### Load necessary library for summary statistics
+```{r}
+library(dplyr)
+```
+
+#### Group by 'Source' and calculate descriptive statistics for 'Enrollment'
+```{r}
+descriptive_stats <- combined_data %>%
+  group_by(Source) %>%
+  summarize(
+    Mean = mean(Enrollment, na.rm = TRUE),
+    Median = median(Enrollment, na.rm = TRUE),
+    Mode = as.numeric(names(sort(table(Enrollment), decreasing = TRUE)[1])),
+    Range = max(Enrollment, na.rm = TRUE) - min(Enrollment, na.rm = TRUE),
+    Std_Dev = sd(Enrollment, na.rm = TRUE),
+    Total_Count = n() # Total count of observations per 'Source'
+  )
+```
+
+##### Print out the descriptive statistics
+```{r}
+print(descriptive_stats)
+```
+
+### Frequency Distributions and Visualizations
+
+#### Load necessary library for creating visualizations
+```{r}
+library(ggplot2)
+```
+
+#### Function to add legends
+```{r}
+add_legend <- function(freq_table, main_title, x_label, y_label, legend_labels) {
+  barplot(freq_table, main = main_title, xlab = x_label, ylab = y_label, col = rainbow(length(legend_labels)))
+  
+  # Add legend
+  legend("topright", legend = legend_labels, fill = rainbow(length(legend_labels)))
+}
+```
+
+#### Study.Status
+```{r}
+study_status_freq <- table(combined_data$Study.Status.numeric)
+print(study_status_freq)
+barplot(study_status_freq, main="Study Status Frequency", xlab="Status", ylab="Frequency", las=2)
+legend_labels <- c("COMPLETED", "NOT_YET_RECRUITING", "UNKNOWN", "ACTIVE_NOT_RECRUITING",
+                   "RECRUITING", "WITHDRAWN", "TERMINATED", "SUSPENDED", "ENROLLING_BY_INVITATION")
+add_legend(study_status_freq, "Study Status Frequency", "Status", "Frequency", legend_labels)
+```
+
+#### Study.Results
+```{r}
+study_results_freq <- table(combined_data$Study.Results.numeric)
+barplot(study_results_freq, main="Study Results Frequency", xlab="Results", ylab="Frequency")
+legend_labels <- c("YES", "NO")
+add_legend(study_results_freq, "Study Results Frequency", "Results", "Frequency", legend_labels)
+```
+
+#### Age
+```{r}
+age_freq <- table(combined_data$Age.numeric)
+barplot(age_freq, main="Age Frequency", xlab="Age", ylab="Frequency")
+legend_labels <- c("ADULT, OLDER_ADULT", "ADULT", "CHILD, ADULT", "CHILD, ADULT, OLDER_ADULT",
+                   "CHILD", "OLDER_ADULT")
+add_legend(age_freq, "Age Frequency", "Age", "Frequency", legend_labels)
+```
+
+#### Sex
+```{r}
+sex_freq <- table(combined_data$Sex.numeric)
+barplot(sex_freq, main="Sex Frequency", xlab="Sex", ylab="Frequency")
+legend_labels <- c("ALL", "MALE", "FEMALE")
+add_legend(sex_freq, "Sex Frequency", "Sex", "Frequency", legend_labels)
+```
+
+#### Phases
+```{r}
+phases_freq <- table(combined_data$Phases.numeric)
+barplot(phases_freq, main="Phases Frequency", xlab="Phases", ylab="Frequency", las=2)
+legend_labels <- c("PHASE3", "PHASE2", "EARLY_PHASE1", "PHASE1", "PHASE1|PHASE2", "PHASE4", "PHASE2|PHASE3")
+add_legend(phases_freq, "Phases Frequency", "Phases", "Frequency", legend_labels)
+```
+
+#### Funder.Type
+```{r}
+funder_type_freq <- table(combined_data$Funder.Type.numeric)
+barplot(funder_type_freq, main="Funder Type Frequency", xlab="Funder Type", ylab="Frequency", las=2)
+legend_labels <- c("INDUSTRY", "OTHER", "NIH", "FED", "OTHER_GOV", "NETWORK", "UNKNOWN", "INDIV")
+add_legend(funder_type_freq, "Funder Type Frequency", "Funder Type", "Frequency", legend_labels)
+```
+
+#### Study.Type
+```{r}
+study_type_freq <- table(combined_data$Study.Type.numeric)
+barplot(study_type_freq, main="Study Type Frequency", xlab="Study Type", ylab="Frequency")
+legend_labels <- c("INTERVENTIONAL", "OBSERVATIONAL")
+add_legend(study_type_freq, "Study Type Frequency", "Study Type", "Frequency", legend_labels)
+```
+
+#### Allocation
+```{r}
+allocation_freq <- table(combined_data$Allocation.numeric)
+barplot(allocation_freq, main="Allocation Frequency", xlab="Allocation", ylab="Frequency")
+legend_labels <- c("RANDOMIZED", "NON_RANDOMIZED")
+add_legend(allocation_freq, "Allocation Frequency", "Allocation", "Frequency", legend_labels)
+```
+
+#### Interventional_Model
+```{r}
+interventional_model_freq <- table(combined_data$Interventional_Model.numeric)
+barplot(interventional_model_freq, main="Interventional Model Frequency", xlab="Interventional Model", ylab="Frequency", las=2)
+legend_labels <- c("PARALLEL", "SINGLE_GROUP", "SEQUENTIAL", "FACTORIAL", "CROSSOVER")
+add_legend(interventional_model_freq, "Interventional Model Frequency", "Interventional Model", "Frequency", legend_labels)
+```
+
+#### Primary_Purpose
+```{r}
+primary_purpose_freq <- table(combined_data$Primary_Purpose.numeric)
+barplot(primary_purpose_freq, main="Primary Purpose Frequency", xlab="Primary Purpose", ylab="Frequency", las=2)
+legend_labels <- c("TREATMENT", "DIAGNOSTIC", "PREVENTION", "BASIC_SCIENCE", "SUPPORTIVE_CARE", "OTHER",
+                   "HEALTH_SERVICES_RESEARCH", "DEVICE_FEASIBILITY", "ECT", "SCREENING")
+add_legend(primary_purpose_freq, "Primary Purpose Frequency", "Primary Purpose", "Frequency", legend_labels)
+```
+
+
+#### Top_Intervention_Categories
+```{r}
+top_intervention_categories_freq <- table(combined_data$Top_Intervention_Categories.numeric)
+barplot(top_intervention_categories_freq, main="Top Intervention Categories Frequency", xlab="Top Intervention Categories", ylab="Frequency", las=2)
+legend_labels <- c("DRUG", "OTHER", "BIOLOGICAL", "PROCEDURE", "DEVICE", "DIAGNOSTIC_TEST", "DRUG,OTHER", "BIOLOGICAL,DRUG")
+add_legend(top_intervention_categories_freq, "Top Intervention Categories Frequency", "Top Intervention Categories", "Frequency", legend_labels)
+```
+
+
+### Load required libraries
+```{r}
+library(ggplot2)
+
+### Create the plot
+ggplot(combined_data, aes(x = factor(Study.Status.numeric), fill = factor(Source.numeric))) +
+  geom_bar(position = "dodge", stat = "count") +
+  labs(x = "Study Status", y = "Count", fill = "Dataset") +
+  scale_fill_discrete(name = "Dataset", labels = c("Cancer", "Covid19", "Heart", "HIV", "Malaria", "Pneumonia")) +
+  scale_x_discrete(breaks = 1:9,
+                   labels = c("Comp", "NYR", "Unk", 
+                               "ANR", "Rec", 
+                               "With", "Term", 
+                               "Susp", "EBI")) +
+  theme_minimal() 
+```
+
+### Calculate counts
+```{r}
+count_table <- table(combined_data$Source.numeric, combined_data$Study.Status.numeric)
+```
+
+### Print counts
+```{r}
+print(count_table)
+```
+
+```{r}
+ggplot(combined_data, aes(x = factor(Study.Results.numeric), fill = factor(Source.numeric))) +
+  geom_bar(position = "dodge", stat = "count") +
+  labs(x = "Study Results", y = "Count", fill = "Dataset") +
+  scale_fill_discrete(name = "Dataset", labels = c("Cancer", "Covid19", "Heart", "HIV", "Malaria", "Pneumonia")) +
+  scale_x_discrete(breaks = 1:2,
+                   labels = c("YES", "NO")) +
+  theme_minimal() 
+```
+
+### Calculate counts
+```{r}
+count_table <- table(combined_data$Source.numeric, combined_data$Study.Results.numeric)
+```
+
+### Print counts
+```{r}
+print(count_table)
+```
+
+```{r}
+ggplot(combined_data, aes(x = factor(Age.numeric), fill = factor(Source.numeric))) +
+  geom_bar(position = "dodge", stat = "count") +
+  labs(x = "Age", y = "Count", fill = "Dataset") +
+  scale_fill_discrete(name = "Dataset", labels = c("Cancer", "Covid19", "Heart", "HIV", "Malaria", "Pneumonia")) +
+  scale_x_discrete(breaks = 1:6,
+                   labels = c("AO", "A", "CA", "CAO", "C", "O")) +
+  theme_minimal() 
+```
+
+### Calculate counts
+```{r}
+count_table <- table(combined_data$Source.numeric, combined_data$Age.numeric)
+```
+
+### Print counts
+```{r}
+print(count_table)
+```
+
+```{r}
+ggplot(combined_data, aes(x = factor(Sex.numeric), fill = factor(Source.numeric))) +
+  geom_bar(position = "dodge", stat = "count") +
+  labs(x = "Sex", y = "Count", fill = "Dataset") +
+  scale_fill_discrete(name = "Dataset", labels = c("Cancer", "Covid19", "Heart", "HIV", "Malaria", "Pneumonia")) +
+  scale_x_discrete(breaks = 1:3,
+                   labels = c("ALL", "MALE", "FEMALE")) +
+  theme_minimal() 
+```
+
+### Calculate counts
+```{r}
+count_table <- table(combined_data$Source.numeric, combined_data$Sex.numeric)
+```
+
+### Print counts
+```{r}
+print(count_table)
+```
+
+```{r}
+ggplot(combined_data, aes(x = factor(Phases.numeric), fill = factor(Source.numeric))) +
+  geom_bar(position = "dodge", stat = "count") +
+  labs(x = "Phases", y = "Count", na.rm = TRUE, fill = "Dataset") +
+  scale_fill_discrete(name = "Dataset", labels = c("Cancer", "Covid19", "Heart", "HIV", "Malaria", "Pneumonia")) +
+  scale_x_discrete(breaks = c(1,2,3,4,5,6,7))
+labels = c("P3", "P2", "EP1", "P1", "P1|P2", "P4", "P2|P3") +
+  theme_minimal() 
+```
+
+### Calculate counts
+```{r}
+count_table <- table(combined_data$Source.numeric, combined_data$Phases.numeric)
+```
+
+### Print counts
+```{r}
+print(count_table)
+```
+
+```{r}
+ggplot(combined_data, aes(x = factor(Funder.Type.numeric), fill = factor(Source.numeric))) +
+  geom_bar(position = "dodge", stat = "count") +
+  labs(x = "Funder Type", y = "Count", fill = "Dataset") +
+  scale_fill_discrete(name = "Dataset", labels = c("Cancer", "Covid19", "Heart", "HIV", "Malaria", "Pneumonia")) +
+  scale_x_discrete(breaks = 1:8,
+                   labels = c("IND", "OTH", "NIH", "FED", "OG", "NET", "UNK", "INDV")) +
+  theme_minimal() 
+```
+
+### Calculate counts
+```{r}
+count_table <- table(combined_data$Source.numeric, combined_data$Funder.Type.numeric)
+```
+
+### Print counts
+```{r}
+print(count_table)
+```
+
+```{r}
+ggplot(combined_data, aes(x = factor(Study.Type.numeric), fill = factor(Source.numeric))) +
+  geom_bar(position = "dodge", stat = "count") +
+  labs(x = "Study Type", y = "Count", fill = "Dataset") +
+  scale_fill_discrete(name = "Dataset", labels = c("Cancer", "Covid19", "Heart", "HIV", "Malaria", "Pneumonia")) +
+  scale_x_discrete(breaks = 1:2,
+                   labels = c("INTERVENTIONAL", "OBSERVATIONAL")) +
+  theme_minimal() 
+```
+
+### Calculate counts
+```{r}
+count_table <- table(combined_data$Source.numeric, combined_data$Study.Type.numeric)
+```
+
+### Print counts
+```{r}
+print(count_table)
+```
+
+
+```{r}
+ggplot(combined_data, aes(x = factor(Allocation.numeric), fill = factor(Source.numeric))) +
+  geom_bar(position = "dodge", stat = "count") +
+  labs(x = "Allocation", y = "Count", fill = "Dataset") +
+  scale_fill_discrete(name = "Dataset", labels = c("Cancer", "Covid19", "Heart", "HIV", "Malaria", "Pneumonia")) +
+  scale_x_discrete(breaks = 1:2,
+                   labels = c("RAND", "NRAND")) +
+  theme_minimal() 
+```
+
+### Calculate counts
+```{r}
+count_table <- table(combined_data$Source.numeric, combined_data$Allocation.numeric)
+```
+
+### Print counts
+```{r}
+print(count_table)
+```
+
+```{r}
+ggplot(combined_data, aes(x = factor(Interventional_Model.numeric), fill = factor(Source.numeric))) +
+  geom_bar(position = "dodge", stat = "count") +
+  labs(x = "Interventional_Model", y = "Count", fill = "Dataset") +
+  scale_fill_discrete(name = "Dataset", labels = c("Cancer", "Covid19", "Heart", "HIV", "Malaria", "Pneumonia")) +
+  scale_x_discrete(breaks = 1:5,
+                   labels = c("PAR", "SG", "SEQ", "FACT", "CROSS")) +
+  theme_minimal() 
+```
+
+### Calculate counts
+```{r}
+count_table <- table(combined_data$Source.numeric, combined_data$Interventional_Model.numeric)
+```
+
+### Print counts
+```{r}
+print(count_table)
+```
+
+```{r}
+ggplot(combined_data, aes(x = factor(Primary_Purpose.numeric), fill = factor(Source.numeric))) +
+  geom_bar(position = "dodge", stat = "count") +
+  labs(x = "Primary_Purpose", y = "Count", fill = "Dataset") +
+  scale_fill_discrete(name = "Dataset", labels = c("Cancer", "Covid19", "Heart", "HIV", "Malaria", "Pneumonia")) +
+  scale_x_discrete(breaks = 1:10,
+                   labels = c("TR", "DG", "PV", "BS", "SC", "OTH",
+                              "HSR", "DF", "ECT", "SCR")) +
+  theme_minimal() 
+```
+
+### Calculate counts
+```{r}
+count_table <- table(combined_data$Source.numeric, combined_data$Primary_Purpose.numeric)
+```
+
+### Print counts
+```{r}
+print(count_table)
+```
+
+```{r}
+ggplot(combined_data, aes(x = factor(Top_Intervention_Categories.numeric), fill = factor(Source.numeric))) +
+  geom_bar(position = "dodge", stat = "count") +
+  labs(x = "Top_Intervention_Categories", y = "Count", fill = "Dataset") +
+  scale_fill_discrete(name = "Dataset", labels = c("Cancer", "Covid19", "Heart", "HIV", "Malaria", "Pneumonia")) +
+  scale_x_discrete(breaks = 1:8,
+                   labels = c("DG", "OTH", "BL", "PR", "DV", "DT", "DG,OTH", "BL,DG")) +
+  theme_minimal() 
+```
+
+### Calculate counts
+```{r}
+count_table <- table(combined_data$Source.numeric, combined_data$Top_Intervention_Categories.numeric)
+```
+
+### Print counts
+```{r}
+print(count_table)
+```
+
+### BIVARIATE ANALYSIS
+
+#### Determining the relationship between 'Study Status' and 'Study Results' 
+```{r}
+contingency_table <- table(combined_data$Study.Status.numeric, combined_data$Study.Results.numeric)
+print(contingency_table)
+```
+
+#### Perform Chi-square test
+```{r}
+chi_square_test <- chisq.test(contingency_table)
+```
+
+#### View the results
+```{r}
+print(chi_square_test)
+```
+
+#### Study Type and Phases
+```{r}
+contingency_table <- table(combined_data$Study.Type.numeric, combined_data$Phases.numeric)
+print(contingency_table)
+```
+
+#### Perform Chi-square test
+```{r}
+chi_square_test <- chisq.test(contingency_table)
+```
+
+#### View the results
+```{r}
+print(chi_square_test)
+```
+
+#### Study Type and Funder Type
+```{r}
+contingency_table <- table(combined_data$Study.Type.numeric, combined_data$Funder.Type.numeric)
+print(contingency_table)
+```
+
+#### Perform Chi-square test
+```{r}
+chi_square_test <- chisq.test(contingency_table)
+```
+
+#### View the results
+```{r}
+print(chi_square_test)
+```
+
+
+#### Study Results and Phases
+```{r}
+contingency_table <- table(combined_data$Study.Results.numeric, combined_data$Phases.numeric)
+print(contingency_table)
+```
+
+#### Perform Chi-square test
+```{r}
+chi_square_test <- chisq.test(contingency_table)
+```
+
+#### View the results
+```{r}
+print(chi_square_test)
+```
+
+#### Study Type and Study Results
+```{r}
+contingency_table <- table(combined_data$Study.Type.numeric, combined_data$Study.Results.numeric)
+print(contingency_table)
+```
+
+#### Perform Chi-square test
+```{r}
+chi_square_test <- chisq.test(contingency_table)
+```
+
+
+#### View the results
+```{r}
+print(chi_square_test)
+```
+
+#### Study Results and Interventional Model
+```{r}
+contingency_table <- table(combined_data$Study.Results.numeric, combined_data$Interventional_Model.numeric)
+print(contingency_table)
+```
+
+
+#### Perform Chi-square test
+```{r}
+chi_square_test <- chisq.test(contingency_table)
+```
+
+#### View the results
+```{r}
+print(chi_square_test)
+```
+
+#### Study Results and Top Intervention Categories
+```{r}
+contingency_table <- table(combined_data$Study.Results.numeric, combined_data$Top_Intervention_Categories.numeric)
+print(contingency_table)
+```
+
+
+#### Perform Chi-square test
+```{r}
+chi_square_test <- chisq.test(contingency_table)
+```
+
+#### View the results
+```{r}
+print(chi_square_test)
+```
+
+
+### ANOVA for 'Enrollment' and 'Study.Status' 
+#### Perform ANOVA
+```{r}
+anova_result <- aov(Enrollment ~ Study.Status, data = combined_data)
+```
+
+#### Display ANOVA summary
+```{r}
+summary(anova_result)
+```
+
+
+### ANOVA for 'Enrollment' and 'Phases' 
+
+#### Perform ANOVA
+```{r}
+anova_result <- aov(Enrollment ~ Phases, data = combined_data)
+```
+
+#### Display ANOVA summary
+```{r}
+summary(anova_result)
+```
+
+### ANOVA for 'Enrollment' and 'Age' 
+
+#### Perform ANOVA
+```{r}
+anova_result <- aov(Enrollment ~ Age, data = combined_data)
+```
+
+#### Display ANOVA summary
+```{r}
+summary(anova_result)
+```
+
+### MULTIVARIATE ANALYSIS
+
+#### Multiple Linear Regression Model (Enrollment, Age, Phases)
+
+##### Convert 'Age.numeric' and 'Phases.numeric' to factors and setting reference categories
+```{r}
+combined_data$Age.numeric <- relevel(factor(combined_data$Age.numeric), ref = "5")
+combined_data$Phases.numeric <- relevel(factor(combined_data$Phases.numeric), ref = "4")
+```
+
+##### Fit the multiple linear regression model
+```{r}
+lm_model <- lm(Enrollment ~ Age.numeric + Phases.numeric, data = combined_data)
+```
+
+##### Print a summary of the regression model
+```{r}
+summary(lm_model)
+```
+
+### TIME SERIES ANALYSIS
+
+#### Cancer Studies Enrollment Trends At The Start Date
+##### Filter for Cancer studies
+```{r}
+cancer_data <- combined_data[combined_data$Source == "Cancer",]
+```
+
+##### Aggregate data by year
+```{r}
+agg_cancer_data <- aggregate(Enrollment ~ Start.Date, data = cancer_data, sum)
+```
+
+##### Create a time series plot
+```{r}
+plot(agg_cancer_data$Start.Date, agg_cancer_data$Enrollment, type = "l", 
+     xlab = "Year", ylab = "Enrollment",
+     main = "Cancer Studies Enrollment Trends At The Start Date")
+```
+
+#### Covid-19 Studies Enrollment Trends At The Start Date
+
+##### Filter for Covid19 studies
+```{r}
+covid19_data <- combined_data[combined_data$Source == "Covid19",]
+```
+
+##### Aggregate data by year
+```{r}
+agg_covid19_data <- aggregate(Enrollment ~ Start.Date, data = covid19_data, sum)
+```
+
+##### Create a time series plot
+```{r}
+plot(agg_covid19_data$Start.Date, agg_covid19_data$Enrollment, type = "l", 
+     xlab = "Year", ylab = "Enrollment",
+     main = "Covid-19 Studies Enrollment Trends At The Start Date")
+```
+
+#### Heart Studies Enrollment Trends At The Start Date
+
+##### Filter for Heart studies
+```{r}
+Heart_data <- combined_data[combined_data$Source == "Heart",]
+```
+
+##### Aggregate data by year
+```{r}
+agg_Heart_data <- aggregate(Enrollment ~ Start.Date, data = Heart_data, sum)
+```
+
+##### Create a time series plot
+```{r}
+plot(agg_Heart_data$Start.Date, agg_Heart_data$Enrollment, type = "l", 
+     xlab = "Year", ylab = "Enrollment",
+     main = "Heart Studies Enrollment Trends At The Start Date")
+```
+
+#### HIV Studies Enrollment Trends At The Start Date
+
+##### Filter for HIV studies
+```{r}
+HIV_data <- combined_data[combined_data$Source == "HIV",]
+```
+
+##### Aggregate data by year
+```{r}
+agg_HIV_data <- aggregate(Enrollment ~ Start.Date, data = HIV_data, sum)
+```
+
+##### Create a time series plot
+```{r}
+plot(agg_HIV_data$Start.Date, agg_HIV_data$Enrollment, type = "l", 
+     xlab = "Year", ylab = "Enrollment",
+     main = "HIV Studies Enrollment Trends At The Start Date")
+```
+
+#### Malaria Studies Enrollment Trends At The Start Date
+
+##### Filter for Malaria studies
+```{r}
+Malaria_data <- combined_data[combined_data$Source == "Malaria",]
+```
+
+##### Aggregate data by year
+```{r}
+agg_Malaria_data <- aggregate(Enrollment ~ Start.Date, data = Malaria_data, sum)
+```
+
+##### Create a time series plot
+```{r}
+plot(agg_Malaria_data$Start.Date, agg_Malaria_data$Enrollment, type = "l", 
+     xlab = "Year", ylab = "Enrollment",
+     main = "Malaria Studies Enrollment Trends At The Start Date")
+```
+
+#### Pneumonia Studies Enrollment Trends At The Start Date
+
+##### Filter for Pneumonia studies
+```{r}
+Pneumonia_data <- combined_data[combined_data$Source == "Pneumonia",]
+```
+
+##### Aggregate data by year
+```{r}
+agg_Pneumonia_data <- aggregate(Enrollment ~ Start.Date, data = Pneumonia_data, sum)
+```
+
+##### Create a time series plot
+```{r}
+plot(agg_Pneumonia_data$Start.Date, agg_Pneumonia_data$Enrollment, type = "l", 
+     xlab = "Year", ylab = "Enrollment",
+     main = "Pneumonia Studies Enrollment Trends At The Start Date")
+```
+
+#### Enrollment Trends At The Start Date
+##### Since Start.Date is in years, aggregate data by year
+```{r}
+agg_data <- aggregate(Enrollment ~ Start.Date, data = combined_data, sum)
+```
+
+##### Create a time series plot
+```{r}
+plot(agg_data$Start.Date, agg_data$Enrollment, type = "l", 
+     xlab = "Year", ylab = "Enrollment",
+     main = "Enrollment Trends At The Start Date")
+```
+
+
+
+
+
+
+
+
+
+
+
