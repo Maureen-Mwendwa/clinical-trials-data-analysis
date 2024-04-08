@@ -17,7 +17,7 @@ To access these files, click on the links above and you will be directed to the 
 
 ## Analysis
 
-The analysis is performed in the `clinical-trials-data-analysis.Rmd` file, which is an R Markdown document. This file can be knitted to generate an HTML report containing the analysis and visualizations.
+The analysis is performed in the `Clinical Trials.Rmd` file, which is an R Markdown document. This file can be knitted to generate an HTML report containing the analysis and visualizations.
 
 ## Usage
 
