@@ -22,7 +22,7 @@ The analysis is performed in the `Clinical Trials.Rmd` file, which is an R Markd
 ## Usage
 
 1. Clone the repository to your local machine: git clone https://github.com/Maureen-Mwendwa/clinical-trials-data-analysis.git
-2. Open the `clinical-trials-data-analysis.Rmd` file in RStudio or your preferred R environment.
+2. Open the `Clinical Trials.Rmd` file in RStudio or your preferred R environment.
 
 3. Knit the R Markdown file to generate the HTML report.
 
